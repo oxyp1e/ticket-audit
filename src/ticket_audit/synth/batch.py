@@ -23,7 +23,7 @@ EXPECTED = {
     "P3": ("exception", ["MISSING_COST_CODE"]),
     "P4": ("approve", []),  # the original; the second copy is the exception (see duplicates)
     "P5": ("approve_adjusted", ["STANDBY_RECOVERED"]),
-    "P6": ("exception", ["LOW_CONFIDENCE"]),
+    "P6": ("approve", []),  # smudged weight: billed from the scale ticket because the two agree
     "P7": ("exception", ["NO_DISPATCH_MATCH"]),
     "P8": ("missing_ticket", ["MISSING_TICKET"]),
     "P9": ("exception", ["FALLBACK_MATCH"]),

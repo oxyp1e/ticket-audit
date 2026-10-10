@@ -94,7 +94,7 @@ def outcomes(batch: Path, engine: str) -> dict:
             else:
                 result["planted_missed"].append({"load": load["load_id"], "planted": "P4"})
             continue
-        if load["planted"] in (None, "P5"):  # these must be approved (P5 with standby added)
+        if load["outcome"] in ("approve", "approve_adjusted"):  # clean, P5 (standby added), P6 (scale weight)
             result["clean"] += 1
             if haul in approved:
                 result["clean_approved"] += 1

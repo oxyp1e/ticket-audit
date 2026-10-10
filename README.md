@@ -24,7 +24,8 @@ Inbox ─▶ Intake ─▶ Extract ─▶ Normalize ─▶ Match ─▶ Rate che
 ```
 
 - **Rules decide, AI only reads.** The decision engine (`domain/rules.py`) is a pure function: no I/O, same inputs give the same decisions every run. Thresholds and reason texts are data; their hash is the rule version stamped on every decision.
-- **When in doubt, it's an exception.** A load is approved only when every check passes: haul ticket ↔ scale ticket (weight, truck, date, product), ticket ↔ dispatch (load number, then fields), rate on file and in effect, signature, AFE and PO, and every critical value read with confidence ≥ 0.90. A match made without a load number is never auto-approved.
+- **When in doubt, it's an exception.** A load is approved only when every check passes: haul ticket ↔ scale ticket (weight, truck, date, product), ticket ↔ dispatch (load number, then fields), rate on file and in effect, signature, AFE and PO, and every value that no other record confirms read with enough confidence (0.90 for money and identity fields, 0.80 otherwise). A match made without a load number is never auto-approved.
+- **Tonnes are billed from the scale ticket** (printed, and checked by gross − tare = net). The driver's handwritten weight is a cross-check: if it agrees within 0.05 t its OCR confidence doesn't matter; if it disagrees, the ticket is held. On real OCR, a smudged weight was read 0.01 t off at 0.91 confidence. Billing from the scale ticket keeps the amount right anyway.
 - **The one automatic adjustment:** standby earned (time on site beyond the rate's free time) but left blank on the ticket is added to the line, and flagged as recovered.
 - **Provenance on every line.** Each approved line carries the SHA-256 of both source photos, the dispatch number, the rate row, the rule version, the extraction engine and model, and the hash of its decision-log entry. The log can't be edited or deleted (database triggers).
 - **Safe to re-run.** Every extraction is cached by photo fingerprint and committed as it's made. A run killed halfway resumes from the cache, and re-running a batch rewrites byte-identical outputs.
@@ -59,7 +60,7 @@ Planted problems cover all three sources the comparison uses:
 | P3 | Ticket | Missing AFE / cost code | Exception |
 | P4 | Ticket | Same ticket submitted twice | Second copy is an exception |
 | P5 | Ticket | Long time on site, standby left blank | Standby added, if a rate is on file |
-| P6 | Ticket | Written-over, smudged net weight | Exception |
+| P6 | Ticket | Written-over, smudged net weight | Billed from the scale ticket, since the two agree |
 | P7 | Dispatch | Ticket with no dispatch record | Exception |
 | P8 | Dispatch | Dispatched load with no ticket | Flagged as a missing ticket |
 | P9 | Dispatch | Load number missing; date + unit + customer match | Matched, never auto-approved |

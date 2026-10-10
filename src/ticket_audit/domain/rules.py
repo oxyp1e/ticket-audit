@@ -1,5 +1,8 @@
 """The decision engine. Pure and deterministic: same inputs, same decisions, every run.
 
+Tonnes are billed from the scale ticket (printed, and checked by gross - tare = net); the driver's
+handwritten weight is a cross-check against it.
+
 Approval needs every check to pass. Anything uncertain, missing or inconsistent becomes an
 exception with a plain reason (ADR 3). Thresholds and reason texts are data (CONFIG, REASONS),
 and their hash is part of the rule version recorded on every decision.
@@ -65,7 +68,7 @@ REASONS = {
 }
 ADJUSTMENTS = {"STANDBY_RECOVERED"}
 
-RULES_REVISION = "1.0"
+RULES_REVISION = "1.1"
 RULE_VERSION = "rules-{}+{}".format(
     RULES_REVISION,
     hashlib.sha256(json.dumps([CONFIG, REASONS], sort_keys=True).encode()).hexdigest()[:8],
@@ -139,6 +142,9 @@ def _corroborated(h: HaulTicket, s: ScaleTicket | None, d: DispatchRecord | None
         haul.add("dispatch_no")
     if standby_ok:
         haul.add("standby_h")
+    if s is not None and s.net_kg is not None and h.net_t is not None and \
+            abs(h.net_t - s.net_kg / 1000) <= CONFIG["weight_tolerance_t"]:
+        haul.add("net_t")  # the handwritten weight agrees with the scale: its OCR confidence doesn't matter
     for name, value in (("date", h.date), ("unit", h.unit), ("product", h.product)):
         others = [getattr(d, name, None) if name != "product" else (key(d.product) if d else None),
                   getattr(s, name, None)]
@@ -282,11 +288,12 @@ def _decide_haul(h: HaulTicket, ref: Reference, scales: dict[str, ScaleTicket], 
         reasons.append(_r("LOW_CONFIDENCE", ", ".join(low)))
 
     line = None
-    if rate and h.net_t is not None and h.ticket_no and h.date:
-        tonnage = round(h.net_t * rate.per_tonne, 2)
+    billed_t = s.net_kg / 1000 if s is not None and s.net_kg is not None else h.net_t
+    if rate and billed_t is not None and h.ticket_no and h.date:
+        tonnage = round(billed_t * rate.per_tonne, 2)
         standby_amount = round(standby_h * rate.standby_per_h, 2)
         line = InvoiceLine(h.ticket_no, h.date, rate.customer_code, d.dispatch_no if d else "", rate.pit_code,
-                           rate.lease_code, d.product if d else (h.product or ""), h.net_t, rate.per_tonne,
+                           rate.lease_code, d.product if d else (h.product or ""), billed_t, rate.per_tonne,
                            tonnage, standby_h, rate.standby_per_h, standby_amount,
                            round(tonnage + standby_amount, 2), recovered)
 

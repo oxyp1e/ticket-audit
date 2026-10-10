@@ -147,7 +147,7 @@ class InvoiceLine:
     pit_code: str
     lease_code: str
     product: str
-    net_t: float
+    net_t: float  # billed tonnes: from the scale ticket
     per_tonne: float
     tonnage_amount: float
     standby_h: float
