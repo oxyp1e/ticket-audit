@@ -92,7 +92,8 @@ class Batch:
 
 
 def _h(hours: float) -> timedelta:
-    return timedelta(hours=hours)
+    """A duration rounded to the minute: tickets and scales only show minutes."""
+    return timedelta(minutes=round(hours * 60))
 
 
 def schedule(world: World, rng: random.Random, days: list[date], target: int) -> list[Load]:
