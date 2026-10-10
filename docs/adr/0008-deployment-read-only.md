@@ -7,6 +7,7 @@ The system is public on the internet so reviewers can see it run. It must not co
 
 ## Decision
 - Azure Container Apps, consumption plan, scale to zero, one replica at most, 0.25 vCPU.
+- The image stays private on ghcr.io; Azure pulls it with a token that can only read packages (stored as an app secret).
 - At startup the container audits the preloaded synthetic batches. OCR results come from the saved Azure responses shipped in the image, through the Azure engine with a page budget of zero: the container has no Document Intelligence key and cannot spend pages. A missing response fails the batch closed.
 - Access code (signed, HTTP-only cookie, 12 hours); 5 sign-in attempts per 15 minutes per address; strict content security policy; no indexing.
 - **No uploads.** Uploads would spend free-tier pages and invite real documents.

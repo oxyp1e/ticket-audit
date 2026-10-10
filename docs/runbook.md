@@ -44,6 +44,8 @@ deploy/deploy.sh             # commit first: build, push to ghcr.io, deploy a ne
 deploy/deploy.sh --no-build  # redeploy the current image, e.g. after rotating the access code
 ```
 
+**Image pull token:** the image on ghcr.io is private; Azure pulls it with `GHCR_PULL_TOKEN`, a classic GitHub token with `read:packages` only (90-day expiry). When it expires, new revisions fail to start with `UNAUTHORIZED`: create a new token, update `.env`, run `deploy/deploy.sh --no-build`.
+
 **Rotate the access code:** change `TA_ACCESS_CODE` in `.env`, run `deploy/deploy.sh --no-build`. To sign everyone out as well, also change `TA_SESSION_SECRET`.
 
 **Logs:**
