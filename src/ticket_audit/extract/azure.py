@@ -113,9 +113,15 @@ class AzureExtractor:
 
     # ── HTTP ─────────────────────────────────────────────────────────────────
     def _request(self, method: str, url: str, **kw) -> requests.Response:
-        """Retry throttling and transient errors with backoff; anything else fails the run (fail closed)."""
+        """Retry throttling, server errors and dropped connections with backoff; anything else fails the run."""
         for attempt in range(8):
-            r = self.session.request(method, url, timeout=60, **kw)
+            try:
+                r = self.session.request(method, url, timeout=60, **kw)
+            except (requests.ConnectionError, requests.Timeout):
+                if attempt == 7:
+                    raise
+                time.sleep(min(2 ** attempt, MAX_BACKOFF_S))
+                continue
             if r.status_code == 429 or r.status_code >= 500:
                 time.sleep(min(float(r.headers.get("Retry-After", 2 ** attempt)), MAX_BACKOFF_S))
                 continue
