@@ -4,7 +4,9 @@ Reads transportation tickets, matches them to dispatch records and customer rate
 
 **All data in this repository is synthetic.** Every company, person, ticket and rate is invented. The real ticket formats of any carrier are not public; the layouts here are designed from public descriptions of frac-sand hauling in Western Canada.
 
-Status: work in progress. Done: synthetic data generator, rule engine, the three fitness functions, Azure extraction, report page. Next: deployment.
+**Live:** https://ticket-audit.ashydesert-36a868a4.canadacentral.azurecontainerapps.io (access code on request). It audits both synthetic batches when it starts and serves the reports; read-only, no uploads, no OCR key inside (see `docs/adr/0008`).
+
+Design decisions: [`docs/adr/`](docs/adr/) · Operations: [`docs/runbook.md`](docs/runbook.md)
 
 ![Report page for the day batch: underbilling found, overbilling prevented, touchless rate and the exception queue](docs/report.png)
 
@@ -16,6 +18,7 @@ uv run python -m ticket_audit.synth          # generate both batches into data/g
 uv run python -m ticket_audit data/generated/audit   # audit a batch -> out/<engine>/approved.csv, exceptions.csv, report.html
 uv run python -m ticket_audit data/generated/audit --engine azure   # same, reading the photos with Azure (needs .env)
 uv run pytest                                # fitness functions, rules, generator realism checks
+deploy/deploy.sh                             # build, push, deploy to Azure Container Apps (see the runbook)
 ```
 
 ## How it decides
