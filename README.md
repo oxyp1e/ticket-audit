@@ -4,14 +4,16 @@ Reads transportation tickets, matches them to dispatch records and customer rate
 
 **All data in this repository is synthetic.** Every company, person, ticket and rate is invented. The real ticket formats of any carrier are not public; the layouts here are designed from public descriptions of frac-sand hauling in Western Canada.
 
-Status: work in progress. Done: synthetic data generator, rule engine, the three fitness functions, Azure extraction. Next: report page, deployment.
+Status: work in progress. Done: synthetic data generator, rule engine, the three fitness functions, Azure extraction, report page. Next: deployment.
+
+![Report page for the day batch: underbilling found, overbilling prevented, touchless rate and the exception queue](docs/report.png)
 
 ## Run
 
 ```bash
 uv sync
 uv run python -m ticket_audit.synth          # generate both batches into data/generated/
-uv run python -m ticket_audit data/generated/audit   # audit a batch -> out/<engine>/approved.csv, exceptions.csv
+uv run python -m ticket_audit data/generated/audit   # audit a batch -> out/<engine>/approved.csv, exceptions.csv, report.html
 uv run python -m ticket_audit data/generated/audit --engine azure   # same, reading the photos with Azure (needs .env)
 uv run pytest                                # fitness functions, rules, generator realism checks
 ```

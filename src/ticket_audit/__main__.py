@@ -9,6 +9,7 @@ from pathlib import Path
 from ticket_audit.extract.azure import AzureExtractor
 from ticket_audit.extract.truth import TruthExtractor
 from ticket_audit.pipeline import run_batch
+from ticket_audit.report import write_report
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +33,7 @@ def main() -> None:
     print(f"  approved {s.approved} · approved with standby added {s.approved_adjusted} · "
           f"exceptions {s.exceptions} · missing tickets {s.missing_tickets}")
     print(f"  outputs in {s.out_dir}")
+    print(f"  report: {write_report(args.batch, args.engine)}")
 
 
 if __name__ == "__main__":
