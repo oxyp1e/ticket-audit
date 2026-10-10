@@ -1,0 +1,27 @@
+{
+ "file": "IMG_1397.jpg",
+ "kind": "haul",
+ "fields": {
+  "ticket_no": "LB-104936",
+  "dispatch_no": "D-26-0447",
+  "date": "2026-09-29",
+  "unit": "447",
+  "trailer": "T-0821",
+  "driver": "P. Tremblay",
+  "customer": "Thornbury Ridge Petroleum Ltd.",
+  "po": "PO-72403",
+  "afe": "AFE 26-0494",
+  "origin": "Fenwick Silica - Pit 3",
+  "scale_ticket_no": "0084455",
+  "lease": "Thornbury 8-30 Pad",
+  "lsd": "08-30-075-02W6",
+  "product": "Frac Sand 100 Mesh",
+  "net_t": "39.14",
+  "arrive": "19:42",
+  "depart": "20:34",
+  "standby_h": "",
+  "receiver_name": "C. Gill",
+  "receiver_signature": "C. Gill"
+ },
+ "illegible": []
+}

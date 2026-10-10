@@ -1,0 +1,27 @@
+{
+ "file": "IMG_5622.jpg",
+ "kind": "haul",
+ "fields": {
+  "ticket_no": "LB-104938",
+  "dispatch_no": "D-26-0461",
+  "date": "Oct 01 2026",
+  "unit": "447",
+  "trailer": "T-0821",
+  "driver": "P. Tremblay",
+  "customer": "Ashgrove Basin",
+  "po": "PO-71888",
+  "afe": "AFE 26-0315",
+  "origin": "Fenwick Silica - Pit 3",
+  "scale_ticket_no": "0084461",
+  "lease": "Ashgrove 6-12 Pad",
+  "lsd": "06-12-074-03W6",
+  "product": "Frac Sand 100 Mesh",
+  "net_t": "40.90",
+  "arrive": "19:17",
+  "depart": "20:05",
+  "standby_h": "",
+  "receiver_name": "L. Moreau",
+  "receiver_signature": "L. Moreau"
+ },
+ "illegible": []
+}

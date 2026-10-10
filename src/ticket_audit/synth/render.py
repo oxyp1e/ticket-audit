@@ -51,17 +51,24 @@ def _hand_text(d: ImageDraw.ImageDraw, xy, text: str, rng: random.Random, size: 
 
 
 def _messy_number(im: Image.Image, xy, text: str, rng: random.Random) -> None:
-    """A number written over a different number, then smudged: the kind of value a clerk squints at."""
-    d = ImageDraw.Draw(im)
+    """A number written over a different number, then smeared by a thumb: only the ink moves."""
     digits = [i for i, c in enumerate(text) if c.isdigit()]
     under = list(text)
     for i in rng.sample(digits, 2):
         under[i] = str((int(text[i]) + rng.randint(2, 7)) % 10)
-    x, y = xy
-    d.text((x + 3, y + 4), "".join(under), font=_hand(50), fill=INK_PEN)
-    d.text((x, y), text, font=_hand(48), fill=INK_PEN)
-    box = (int(x - 10), int(y), int(x + 160), int(y + 70))
-    im.paste(im.crop(box).filter(ImageFilter.GaussianBlur(2.4)), box[:2])
+    ink = Image.new("L", (260, 90), 0)
+    d = ImageDraw.Draw(ink)
+    d.text((14, 10), "".join(under), font=_hand(50), fill=200)
+    d.text((10, 6), text, font=_hand(48), fill=255)
+    # Thumb smear: faded copies dragged sideways and slightly down, strongest near the stroke.
+    smear = ink.copy()
+    for step in range(1, 9):
+        shifted = Image.new("L", ink.size, 0)
+        shifted.paste(ink, (step * 3, step // 3))
+        smear = Image.fromarray(np.maximum(np.asarray(smear), (np.asarray(shifted) * (0.55 - step * 0.05)).astype("uint8")))
+    smear = smear.filter(ImageFilter.GaussianBlur(1.6))
+    x, y = int(xy[0]) - 10, int(xy[1]) - 6
+    im.paste(Image.new("RGB", ink.size, INK_PEN), (x, y), smear)
 
 
 def _signature(im: Image.Image, box, name: str, rng: random.Random) -> None:

@@ -51,6 +51,7 @@ def normalize_lsd(text: str) -> str:
     """Undo common OCR confusions in a DLS location, then zero-pad. Validity is checked separately."""
     t = re.sub(r"\s+", "", text.upper())
     t = re.sub(r"W[S$]$", "W5", t)
+    t = re.sub(r"W[Gb]$", "W6", t)
     head, sep, mer = t.rpartition("W")
     head = head.translate(str.maketrans("OIL", "011"))
     parts = head.split("-")
@@ -58,6 +59,12 @@ def normalize_lsd(text: str) -> str:
         widths = (2, 2, 3, 2)
         head = "-".join(p.zfill(w) for p, w in zip(parts, widths))
     return f"{head}{sep}{mer}"
+
+
+def _digits(text: str) -> str | None:
+    """The ticket number is the first run of digits; anything after it belongs to another field."""
+    m = re.search(r"\d{4,}", text.replace(" ", ""))
+    return m.group() if m else None
 
 
 def _ident(text: str) -> str:
@@ -129,7 +136,7 @@ def normalize_haul(e: Extraction, ref: Reference) -> HaulTicket:
         po=_ident(f["po"]) if "po" in f else None,
         afe=f["afe"].upper() if "afe" in f else None,
         pit_code=pit_code,
-        scale_ticket_no=re.sub(r"\D", "", f["scale_ticket_no"]) if "scale_ticket_no" in f else None,
+        scale_ticket_no=_digits(f["scale_ticket_no"]) if "scale_ticket_no" in f else None,
         lease_code=lease_code,
         lsd=lsd,
         product=key(f["product"]) if "product" in f else None,
@@ -164,7 +171,7 @@ def normalize_scale(e: Extraction) -> ScaleTicket:
         problems.append(Problem("UNREADABLE_FIELD", f"Scale date '{f['date']}' could not be read"))
     return ScaleTicket(
         doc=_doc(e),
-        scale_ticket_no=re.sub(r"\D", "", f["scale_ticket_no"]) if "scale_ticket_no" in f else None,
+        scale_ticket_no=_digits(f["scale_ticket_no"]) if "scale_ticket_no" in f else None,
         date=day,
         unit=_ident(f["unit"]) if "unit" in f else None,
         product=key(f["product"]) if "product" in f else None,

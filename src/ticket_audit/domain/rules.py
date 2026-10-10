@@ -18,10 +18,16 @@ CONFIG = {
     "weight_tolerance_t": 0.05,         # haul-ticket net vs scale net
     "scale_balance_tolerance_kg": 10,   # gross - tare vs printed net
     "standby_tolerance_h": 0.25,        # written standby vs time on site
-    "min_confidence_critical": 0.90,    # fields that move money or identity
+    # Money and identity fields need this confidence even when another record agrees. The one
+    # exception: printed scale weights that balance (gross - tare = net), see _corroborated.
+    "min_confidence_critical": 0.90,
+    "critical_fields": ["ticket_no", "net_t", "gross_kg", "tare_kg", "net_kg"],
+    # Other fields need this, unless an independent record confirms the value exactly
+    # (master data, dispatch, the scale ticket): the agreement is stronger evidence than OCR confidence.
     "min_confidence": 0.80,
-    "critical_fields": ["ticket_no", "net_t", "scale_ticket_no", "gross_kg", "tare_kg", "net_kg",
-                        "date", "unit", "dispatch_no"],
+    # Read but not used by any rule: their confidence doesn't matter.
+    "unused_fields": ["trailer", "driver", "receiver_name", "receiver_signature", "carrier", "weighmaster",
+                      "driver_signature", "time_in", "time_out", "pit", "scale_house"],
 }
 
 # Every reason the engine can give. Exceptions block approval; STANDBY_RECOVERED adjusts the line.
@@ -95,13 +101,58 @@ def billable_standby(arrive: time, depart: time, free_time_h: float) -> float:
     return round(max(0.0, _hours_on_site(arrive, depart) - free_time_h) * 4) / 4
 
 
-def _low_confidence(conf: dict[str, float], prefix: str) -> list[str]:
+def _low_confidence(conf: dict[str, float], corroborated: set[str], prefix: str) -> list[str]:
     low = []
     for name, c in sorted(conf.items()):
-        floor = CONFIG["min_confidence_critical"] if name in CONFIG["critical_fields"] else CONFIG["min_confidence"]
+        if name in CONFIG["unused_fields"]:
+            continue
+        if name in CONFIG["critical_fields"] and name not in corroborated:
+            floor = CONFIG["min_confidence_critical"]
+        elif name in CONFIG["critical_fields"]:
+            continue
+        elif name in corroborated:
+            continue
+        else:
+            floor = CONFIG["min_confidence"]
         if c < floor:
             low.append(f"{prefix}{name} ({c:.2f})")
     return low
+
+
+def _corroborated(h: HaulTicket, s: ScaleTicket | None, d: DispatchRecord | None, lease, customer,
+                  primary_match: bool, standby_ok: bool) -> tuple[set[str], set[str]]:
+    """Fields whose value an independent record confirms exactly, for the haul and the scale ticket."""
+    haul, scale = set(), set()
+    if h.customer_code:
+        haul.add("customer")
+    if h.lease_code:
+        haul.add("lease")
+    if h.pit_code:
+        haul.add("origin")
+    if lease and h.lsd == lease.lsd:
+        haul.add("lsd")
+    if lease and h.afe and key(h.afe) == key(lease.afe):
+        haul.add("afe")
+    if customer and h.po and key(h.po) == key(customer.po):
+        haul.add("po")
+    if d and primary_match:
+        haul.add("dispatch_no")
+    if standby_ok:
+        haul.add("standby_h")
+    for name, value in (("date", h.date), ("unit", h.unit), ("product", h.product)):
+        others = [getattr(d, name, None) if name != "product" else (key(d.product) if d else None),
+                  getattr(s, name, None)]
+        if value is not None and value in others:
+            haul.add(name)
+        if s is not None and getattr(s, name) is not None and getattr(s, name) == value:
+            scale.add(name)
+    if s is not None:
+        haul.add("scale_ticket_no")
+        scale.add("scale_ticket_no")
+        if None not in (s.gross_kg, s.tare_kg, s.net_kg) and \
+                abs(s.gross_kg - s.tare_kg - s.net_kg) <= CONFIG["scale_balance_tolerance_kg"]:
+            scale |= {"gross_kg", "tare_kg", "net_kg"}  # printed and arithmetically consistent
+    return haul, scale
 
 
 def _match_dispatch(h: HaulTicket, by_no: dict[str, DispatchRecord], dispatch: tuple[DispatchRecord, ...],
@@ -177,16 +228,12 @@ def _decide_haul(h: HaulTicket, ref: Reference, scales: dict[str, ScaleTicket], 
         if h.scale_ticket_no:
             seen[f"s:{h.scale_ticket_no}"] = h.doc.file
 
-    low = _low_confidence(h.confidence, "")
     s = scales.get(h.scale_ticket_no) if h.scale_ticket_no else None
     if h.scale_ticket_no and s is None:
         reasons.append(_r("NO_SCALE_TICKET", f"scale ticket {h.scale_ticket_no} not received"))
     if s is not None:
         reasons += [_r(p.code, p.message) for p in s.problems]
         reasons += _scale_checks(h, s)
-        low += _low_confidence(s.confidence, "scale ")
-    if low:
-        reasons.append(_r("LOW_CONFIDENCE", ", ".join(low)))
 
     if not h.signed:
         reasons.append(_r("NO_SIGNATURE"))
@@ -194,13 +241,14 @@ def _decide_haul(h: HaulTicket, ref: Reference, scales: dict[str, ScaleTicket], 
     customer = ref.customers.get(h.customer_code) if h.customer_code else None
     if h.afe is None:
         reasons.append(_r("MISSING_COST_CODE"))
-    elif lease and h.afe != lease.afe.upper():
+    elif lease and key(h.afe) != key(lease.afe):
         reasons.append(_r("COST_CODE_MISMATCH", f"{h.afe} vs {lease.afe} for {lease.name}"))
     if h.po is None:
         reasons.append(_r("MISSING_PO"))
-    elif customer and h.po != customer.po.upper():
+    elif customer and key(h.po) != key(customer.po):
         reasons.append(_r("PO_MISMATCH", f"{h.po} vs {customer.po}"))
 
+    primary_match = bool(h.dispatch_no and h.dispatch_no in by_no)
     d, match_reasons = _match_dispatch(h, by_no, ref.dispatch, claimed)
     reasons += match_reasons
     if d is not None:
@@ -214,7 +262,7 @@ def _decide_haul(h: HaulTicket, ref: Reference, scales: dict[str, ScaleTicket], 
         rate, rate_reasons = _find_rate(h, h.customer_code or d.customer_code, ref.rates)
     reasons += rate_reasons
 
-    standby_h, recovered = h.standby_h or 0.0, False
+    standby_h, recovered, standby_ok = h.standby_h or 0.0, False, False
     if rate and h.arrive and h.depart:
         earned = billable_standby(h.arrive, h.depart, rate.free_time_h)
         if h.standby_h is None and earned > 0:
@@ -223,6 +271,15 @@ def _decide_haul(h: HaulTicket, ref: Reference, scales: dict[str, ScaleTicket], 
                                                    f"{rate.free_time_h:g} h free, {earned:g} h billable"))
         elif h.standby_h is not None and abs(h.standby_h - earned) > CONFIG["standby_tolerance_h"]:
             reasons.append(_r("STANDBY_MISMATCH", f"{h.standby_h:g} h written, {earned:g} h by the times on the ticket"))
+        elif h.standby_h is not None:
+            standby_ok = True
+
+    haul_ok, scale_ok = _corroborated(h, s, d, lease, customer, primary_match, standby_ok)
+    low = _low_confidence(h.confidence, haul_ok, "")
+    if s is not None:
+        low += _low_confidence(s.confidence, scale_ok, "scale ")
+    if low:
+        reasons.append(_r("LOW_CONFIDENCE", ", ".join(low)))
 
     line = None
     if rate and h.net_t is not None and h.ticket_no and h.date:

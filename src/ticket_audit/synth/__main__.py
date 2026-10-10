@@ -115,8 +115,9 @@ def truth(batch: Batch) -> tuple[dict, dict]:
 def write_batch(spec: BatchSpec, seed: int, out: Path, render: bool) -> dict:
     batch = build(spec, seed)
     root = out / spec.name
-    if root.exists():
-        shutil.rmtree(root)
+    # Replace the inputs but keep out/: it holds the OCR cache, which costs free-tier pages to rebuild.
+    for stale in ("inbox", "truth"):
+        shutil.rmtree(root / stale, ignore_errors=True)
     (root / "inbox").mkdir(parents=True)
     (root / "truth").mkdir()
     write_tms(batch, root / "tms.sqlite")

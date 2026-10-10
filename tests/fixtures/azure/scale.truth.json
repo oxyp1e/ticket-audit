@@ -1,0 +1,22 @@
+{
+ "file": "IMG_1059.jpg",
+ "kind": "scale",
+ "fields": {
+  "scale_ticket_no": "0091488",
+  "pit": "Marrowby Silica - Pit 2",
+  "scale_house": "NORTH SCALE",
+  "date": "2026-10-02",
+  "time_in": "10:45",
+  "time_out": "11:05",
+  "carrier": "LARKSPUR BULK",
+  "unit": "692",
+  "trailer": "T-0478",
+  "product": "FRAC SAND 100 MESH",
+  "gross_kg": "59,560",
+  "tare_kg": "21,310",
+  "net_kg": "38,250",
+  "weighmaster": "A. Petrov",
+  "driver_signature": "S. Dube"
+ },
+ "illegible": []
+}
