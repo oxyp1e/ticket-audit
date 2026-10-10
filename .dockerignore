@@ -1,0 +1,17 @@
+# Secrets never enter the image
+.env
+.env.*
+
+.git
+.venv
+**/__pycache__
+.pytest_cache
+tests
+docs
+
+# Run state is rebuilt inside the container at startup; only inputs and saved OCR responses ship
+data/generated/*/out/*/store.sqlite
+data/generated/*/out/*/*.csv
+data/generated/*/out/*/*.html
+data/generated/*/out/*/*.json
+data/generated/*/out/truth
