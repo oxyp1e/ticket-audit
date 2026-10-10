@@ -21,7 +21,9 @@ Each load produces two phone photos: the driver's **haul ticket** (pre-printed f
 | Batch | Loads | Problems | Read with |
 |---|---|---|---|
 | `audit` | 30 | every planted problem at least once, ~19 clean | Azure AI Document Intelligence |
-| `day` | 300 (one day at "hundreds of tickets" volume) | a realistic share, ~15% of loads | generator truth (no OCR: the free tier covers 500 pages a month) |
+| `day` | 100 loads in one day (~200 ticket photos) | a realistic share, ~15% of loads | Azure AI Document Intelligence, once; results cached by photo fingerprint |
+
+Both batches together come to about 260 OCR pages, inside the free tier's 500 a month. Development and tests run on generator truth and use no pages.
 
 Planted problems cover all three sources the comparison uses:
 

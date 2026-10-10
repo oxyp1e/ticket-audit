@@ -41,8 +41,8 @@ class BatchSpec:
 BATCHES = {
     # Every planted problem at least once; read with real OCR.
     "audit": BatchSpec("audit", [date(2026, 9, 28) + timedelta(days=i) for i in range(5)], 8, 30, "audit"),
-    # One day at "hundreds of tickets" volume with a realistic share of problems.
-    "day": BatchSpec("day", [date(2026, 10, 1)], 130, 300, "volume"),
+    # One full day (~200 ticket photos), all read with real OCR once and cached: fits the free tier.
+    "day": BatchSpec("day", [date(2026, 10, 1)], 45, 100, "volume"),
 }
 
 
