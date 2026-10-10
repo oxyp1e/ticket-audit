@@ -1,0 +1,27 @@
+{
+ "file": "IMG_2786.jpg",
+ "kind": "haul",
+ "fields": {
+  "ticket_no": "LB-111559",
+  "dispatch_no": "D-26-0638",
+  "date": "01-Oct-26",
+  "unit": "531",
+  "trailer": "T-0251",
+  "driver": "E. Reimer",
+  "customer": "Brackenhollow Energy Ltd.",
+  "po": "PO-75186",
+  "afe": "AFE 26-0769",
+  "origin": "Marrowby Silica - Pit 2",
+  "scale_ticket_no": "0080915",
+  "lease": "Brackenhollow 4-9 Pad",
+  "lsd": "04-09-056-02W6",
+  "product": "Frac Sand 40/70",
+  "net_t": "41.52",
+  "arrive": "14:38",
+  "depart": "15:31",
+  "standby_h": "",
+  "receiver_name": "C. Horvath",
+  "receiver_signature": "C. Horvath"
+ },
+ "illegible": []
+}

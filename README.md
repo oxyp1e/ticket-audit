@@ -4,7 +4,7 @@ Reads transportation tickets, matches them to dispatch records and customer rate
 
 **All data in this repository is synthetic.** Every company, person, ticket and rate is invented. The real ticket formats of any carrier are not public; the layouts here are designed from public descriptions of frac-sand hauling in Western Canada.
 
-Status: work in progress. Done: synthetic data generator, rule engine, and the three fitness functions. Next: Azure extraction, report page, deployment.
+Status: work in progress. Done: synthetic data generator, rule engine, the three fitness functions, Azure extraction. Next: report page, deployment.
 
 ## Run
 
@@ -12,6 +12,7 @@ Status: work in progress. Done: synthetic data generator, rule engine, and the t
 uv sync
 uv run python -m ticket_audit.synth          # generate both batches into data/generated/
 uv run python -m ticket_audit data/generated/audit   # audit a batch -> out/<engine>/approved.csv, exceptions.csv
+uv run python -m ticket_audit data/generated/audit --engine azure   # same, reading the photos with Azure (needs .env)
 uv run pytest                                # fitness functions, rules, generator realism checks
 ```
 
@@ -39,6 +40,21 @@ Inbox ─▶ Intake ─▶ Extract ─▶ Normalize ─▶ Match ─▶ Rate che
 | Reliability | Kill a run halfway, re-run: byte-identical outputs, no document read twice, no ticket billed twice |
 
 Each test was checked by deliberately breaking the engine (removing the signature check, widening the weight tolerance, dropping a hash, bypassing the cache, auto-approving fallback matches); all five breaks were caught.
+
+## Results on real OCR (Azure AI Document Intelligence, free tier)
+
+Every photo in both batches was read once by Azure; raw responses are cached, so re-running costs nothing.
+
+| Batch | Photos | Decision fields read right | Wrong *and* confident | Planted problems held | Loads that should pass, approved |
+|---|---|---|---|---|---|
+| audit (30 loads) | 59 | 655 / 658 (99.5%) | 1 | 9 / 9 | 20 / 22 |
+| day (100 loads) | 199 | 2,203 / 2,204 (99.95%) | 0 | 12 / 12 | 89 / 89 |
+
+- The one confident misread: a smudged, written-over weight read as 40.48 t (true 40.49) at 0.91 confidence. Billing uses the scale ticket, so the amount is still right.
+- The two held loads in the audit batch are both a real misread of one customer's PO (`75186` read as `75786`: a handwritten 1 vs 7). The system holds the ticket instead of guessing.
+- Run `uv run python -m ticket_audit.evaluate data/generated/<batch> --engine azure` to reproduce (it compares with the generator's answer key, which the rules never see).
+
+What it took: Azure's own label-value pairing was the weak spot on these forms (it glued a ticket number to the date, missed a signature box, and shifted a whole row by one). Fields are now paired with labels by position on the page; Azure's pairing is a second opinion, and when the two disagree the field goes to a human. Each case is a regression test built from a saved response (`tests/fixtures/azure/`).
 
 ## Synthetic data
 

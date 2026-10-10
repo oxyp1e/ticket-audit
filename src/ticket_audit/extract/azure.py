@@ -37,7 +37,7 @@ SCALE_LABELS = [
     ("driversig", "driver_signature"),
 ]
 TICKET_NO = re.compile(r"\b[A-Z]{2}-\d{6}\b")
-MAPPER_VERSION = "4"
+MAPPER_VERSION = "8"
 POLL_INTERVAL_S = 2.5
 MAX_BACKOFF_S = 15.0
 DISAGREEMENT_CONFIDENCE = 0.5
@@ -220,10 +220,17 @@ class AzureExtractor:
                         return abs(cy(o) - (cy(ln) + tilt * (o["box"][0] - x0)))
                     row = [o for o in values if o["box"][0] > x1 - h and off(o) < 0.6 * h]
                     value = min(row, key=off, default=None)
-            else:  # the handwriting just below the box label
+            else:  # the handwriting below the box label, above the next label down in the same column
                 def drop(o):
-                    return o["box"][1] - (y1 + tilt * (o["box"][0] - x0))
-                below = [o for o in values if -0.3 * h < drop(o) < 2.5 * h and -1.5 * h < o["box"][0] - x0 < 6 * h]
+                    return cy(o) - (cy(ln) + tilt * (o["box"][0] - x0))
+
+                def in_column(o):
+                    return -1.5 * h < o["box"][0] - x0 < 6 * h
+
+                next_label = min((drop(o) for o, lab2 in zip(lines, labels)
+                                  if lab2 and o is not ln and in_column(o) and drop(o) > 0.5 * h), default=6 * h)
+                below = [o for o in values if 0 < drop(o) < min(next_label, 6 * h) and in_column(o)
+                         and key(o["text"]) not in key(label)]  # skip label fragments split off, e.g. "(h)"
                 value = min(below, key=drop, default=None)
             if value is None:
                 continue
@@ -251,6 +258,9 @@ class AzureExtractor:
                     fields["net_kg"] = Field(text[0], conf)
                 continue
             name = next((f for stem, f in labels if label.startswith(stem)), None)
+            printed = next((key(lb) for lb, f in (HAUL_FORM if kind == "haul" else SCALE_FORM) if f == name), "")
+            if key(text[0]) in printed:  # a piece of the printed label split off as a "value", e.g. "(h)"
+                continue
             if name and name not in fields:
                 fields[name] = Field(text[0], conf)
         return fields

@@ -28,7 +28,8 @@ def extractor():
     return AzureExtractor("https://example.invalid/", "unused")
 
 
-@pytest.mark.parametrize("label", ["haul-clean", "haul-shifted-pairs", "scale"])
+@pytest.mark.parametrize("label", ["haul-clean", "haul-shifted-pairs", "haul-overlapping-value",
+                                   "haul-split-label", "scale"])
 def test_every_field_lands_where_it_belongs(extractor, label):
     result = json.loads((FIXTURES / f"{label}.json").read_text())
     truth = json.loads((FIXTURES / f"{label}.truth.json").read_text())

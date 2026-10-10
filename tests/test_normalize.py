@@ -12,6 +12,7 @@ from ticket_audit.domain.rules import billable_standby
     ("4-17-62-20W5", "04-17-062-20W5"),
     ("O4-17-O62-20W5", "04-17-062-20W5"),
     (" 04-17-062-20 W5 ", "04-17-062-20W5"),
+    ("08-30-075-02WE", "08-30-075-02W6"),   # seen from Azure on the day batch
 ])
 def test_lsd_ocr_confusions_are_undone(raw, fixed):
     assert normalize_lsd(raw) == fixed
@@ -22,7 +23,7 @@ def test_lsd_that_is_wrong_stays_wrong():
     assert not is_valid_lsd(normalize_lsd("04-37-062-20W5"))
 
 
-@pytest.mark.parametrize("text", ["2026-09-28", "28-Sep-26", "Sep 28 2026"])
+@pytest.mark.parametrize("text", ["2026-09-28", "28-Sep-26", "Sep 28 2026", "2026- 09-28"])
 def test_date_formats_drivers_use(text):
     assert parse_date(text) == date(2026, 9, 28)
 

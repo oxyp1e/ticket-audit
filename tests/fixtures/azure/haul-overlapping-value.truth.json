@@ -1,0 +1,27 @@
+{
+ "file": "IMG_6479.jpg",
+ "kind": "haul",
+ "fields": {
+  "ticket_no": "LB-109421",
+  "dispatch_no": "D-26-0614",
+  "date": "2026-10-01",
+  "unit": "466",
+  "trailer": "T-0102",
+  "driver": "N. Wiebe",
+  "customer": "Quillmere Resources",
+  "po": "PO-74648",
+  "afe": "AFE 26-0395",
+  "origin": "Marrowby Silica - Pit 2",
+  "scale_ticket_no": "0080906",
+  "lease": "Quillmere 16-26 Pad",
+  "lsd": "16-26-068-01W6",
+  "product": "Frac Sand 40/70",
+  "net_t": "40.89",
+  "arrive": "13:04",
+  "depart": "13:58",
+  "standby_h": "",
+  "receiver_name": "R. Ramos",
+  "receiver_signature": "R. Ramos"
+ },
+ "illegible": []
+}

@@ -24,9 +24,10 @@ def key(text: str) -> str:
 
 
 def parse_date(text: str) -> date | None:
+    text = re.sub(r"\s*([-/])\s*", r"\1", text.strip())  # "2026- 10-01" -> "2026-10-01"
     for fmt in DATE_FORMATS:
         try:
-            return datetime.strptime(text.strip(), fmt).date()
+            return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
     return None
@@ -51,7 +52,7 @@ def normalize_lsd(text: str) -> str:
     """Undo common OCR confusions in a DLS location, then zero-pad. Validity is checked separately."""
     t = re.sub(r"\s+", "", text.upper())
     t = re.sub(r"W[S$]$", "W5", t)
-    t = re.sub(r"W[Gb]$", "W6", t)
+    t = re.sub(r"W[GbE]$", "W6", t)
     head, sep, mer = t.rpartition("W")
     head = head.translate(str.maketrans("OIL", "011"))
     parts = head.split("-")
