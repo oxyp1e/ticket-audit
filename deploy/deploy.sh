@@ -26,9 +26,10 @@ PULL_TOKEN="${GHCR_PULL_TOKEN:?set GHCR_PULL_TOKEN in .env (classic token, read:
 [ "$(az account show --subscription "$SUB" --query id -o tsv)" = "$SUB" ] || { echo "wrong subscription"; exit 1; }
 
 if [ "${1:-}" != "--no-build" ]; then
-  [ -z "$(git status --porcelain -- src assets Dockerfile pyproject.toml uv.lock)" ] || { echo "commit first: the image tag is the commit"; exit 1; }
+  [ -z "$(git status --porcelain -- src assets tests scripts Dockerfile pyproject.toml uv.lock)" ] || { echo "commit first: the image tag is the commit"; exit 1; }
   gh auth token | docker login ghcr.io -u "$OWNER" --password-stdin >/dev/null
-  docker buildx build --platform linux/amd64 -t "$IMAGE" -t "ghcr.io/${OWNER}/ticket-audit:latest" --push .
+  docker buildx build --platform linux/amd64 --build-arg GIT_SHA="$TAG" \
+    -t "$IMAGE" -t "ghcr.io/${OWNER}/ticket-audit:latest" --push .
 fi
 
 if ! az containerapp show -n "$APP" -g "$RG" --subscription "$SUB" >/dev/null 2>&1; then

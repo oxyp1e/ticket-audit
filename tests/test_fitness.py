@@ -159,3 +159,21 @@ def test_killed_run_resumes_with_identical_output(name, tmp_path):
            ["failed", "complete", "complete"]
     tickets = [r["ticket_no"] for r in read_csv(again.out_dir / "approved.csv")]
     assert len(tickets) == len(set(tickets)), "a ticket was billed twice"
+
+
+def test_every_ticket_decision_shows_every_check(audited):
+    """The trace: each haul decision lists all checks; failed checks and blocking reasons agree."""
+    from ticket_audit.domain.rules import ADJUSTMENTS, CHECKS
+    batch, s = audited
+    log = sqlite3.connect(s.out_dir / "store.sqlite")
+    for (raw,) in log.execute("SELECT entry FROM decision_log WHERE run_id=?", (s.run_id,)):
+        e = json.loads(raw)
+        if e["kind"] != "haul":
+            continue
+        assert [c["key"] for c in e["checks"]] == [k for k, *_ in CHECKS]
+        failed = {c["key"] for c in e["checks"] if c["status"] == "fail"}
+        blocking = {r["code"] for r in e["reasons"] if r["code"] not in ADJUSTMENTS}
+        owners = {k for k, _, _, codes in CHECKS if set(codes) & blocking}
+        assert failed == owners, e["subject"]
+        if e["outcome"] in ("approve", "approve_adjusted"):
+            assert all(c["status"] in ("pass", "adjust") for c in e["checks"]), e["subject"]

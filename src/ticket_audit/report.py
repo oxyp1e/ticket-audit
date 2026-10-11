@@ -50,6 +50,7 @@ class Summary:
     queue: list[dict] = field(default_factory=list)
     lines: list[dict] = field(default_factory=list)
     evaluation: dict | None = None
+    entries: dict[str, dict] = field(default_factory=dict)  # every decision by subject, with what was read
 
     @property
     def underbilling(self) -> float:
@@ -90,6 +91,11 @@ def summarize(batch: Path, engine: str) -> Summary:
                 reasons=Counter(),
                 evaluation=json.loads(evaluation_file.read_text()) if evaluation_file.exists() else None)
     for e in entries:
+        haul_doc = e["documents"].get("haul")
+        e["read"] = read.get(haul_doc["sha256"], {}) if haul_doc else {}
+        scale_doc = e["documents"].get("scale")
+        e["read_scale"] = read.get(scale_doc["sha256"], {}) if scale_doc else {}
+        s.entries[e["subject"]] = e
         line = e["line"]
         codes = [r["code"] for r in e["reasons"]]
         if e["kind"] == "haul":
@@ -118,8 +124,8 @@ def summarize(batch: Path, engine: str) -> Summary:
                     s.on_hold_value += line["total"]
                     if line["standby_recovered"]:
                         s.at_stake_standby += line["standby_amount"]
-        haul_doc = e["documents"].get("haul")
-        s.queue.append({**e, "amount": amount, "read": read.get(haul_doc["sha256"], {}) if haul_doc else {}})
+        e["amount"] = amount
+        s.queue.append(e)
     for name in ("recovered", "at_stake_standby", "at_stake_missing", "overbilling_prevented",
                  "on_hold_value", "approved_value"):
         setattr(s, name, round(getattr(s, name), 2))

@@ -6,8 +6,9 @@
 .venv
 **/__pycache__
 .pytest_cache
-tests
 docs
+build-info.json
+.pytest-junit.xml
 
 # Run state is rebuilt inside the container at startup; only inputs and saved OCR responses ship
 data/generated/*/out/*/store.sqlite

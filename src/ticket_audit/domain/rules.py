@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
 from ticket_audit.domain.model import (
-    Decision, DispatchRecord, HaulTicket, InvoiceLine, RateRow, Reason, Reference, ScaleTicket,
+    Check, Decision, DispatchRecord, HaulTicket, InvoiceLine, RateRow, Reason, Reference, ScaleTicket,
 )
 from ticket_audit.domain.normalize import key
 
@@ -68,10 +68,46 @@ REASONS = {
 }
 ADJUSTMENTS = {"STANDBY_RECOVERED"}
 
+# Every check run on a haul ticket, in order: (key, name, what it requires, reason codes it can raise).
+# Each haul-ticket reason belongs to exactly one check. Rendered as the rule table on the site.
+CHECKS = [
+    ("read", "Ticket read completely",
+     "Every required field is present, parses, and resolves against master data: customer, pit, lease and a valid "
+     "land description that matches the lease", ["UNREADABLE_FIELD", "UNKNOWN_CUSTOMER", "UNKNOWN_ORIGIN",
+                                                  "UNKNOWN_LEASE", "INVALID_LSD", "LSD_MISMATCH"]),
+    ("duplicate", "Not already submitted",
+     "No earlier ticket with the same ticket number or the same scale ticket", ["DUPLICATE_TICKET"]),
+    ("scale_found", "Scale ticket found",
+     "The scale ticket number written on the haul ticket matches a scale ticket in the batch", ["NO_SCALE_TICKET"]),
+    ("scale_balance", "Scale ticket adds up",
+     "Gross − tare = net, within {scale_balance_tolerance_kg} kg", ["SCALE_INCONSISTENT"]),
+    ("weight", "Weight agrees with the scale",
+     "The driver's net weight is within {weight_tolerance_t} t of the scale's; tonnes are billed from the scale",
+     ["WEIGHT_MISMATCH"]),
+    ("scale_match", "Scale ticket is this load", "Same truck, date and product as the haul ticket", ["SCALE_MISMATCH"]),
+    ("signature", "Signed by the receiver", "The receiver signature box is not empty", ["NO_SIGNATURE"]),
+    ("afe", "AFE / cost code", "Present, and the lease's AFE", ["MISSING_COST_CODE", "COST_CODE_MISMATCH"]),
+    ("po", "PO number", "Present, and the customer's PO", ["MISSING_PO", "PO_MISMATCH"]),
+    ("dispatch", "Matched to a dispatched load",
+     "The load number is in dispatch. A match on date, truck and customer alone is held for a person",
+     ["NO_DISPATCH_MATCH", "FALLBACK_MATCH", "AMBIGUOUS_MATCH"]),
+    ("dispatch_agree", "Agrees with dispatch",
+     "Date, truck, customer, pit, lease and product match the dispatched load", ["DISPATCH_MISMATCH"]),
+    ("rate", "Rate on file and in effect",
+     "Exactly one rate for this customer, pit and lease, in effect on the ticket date",
+     ["NO_RATE", "RATE_EXPIRED", "AMBIGUOUS_RATE"]),
+    ("standby", "Standby",
+     "Time on site beyond the rate's free time. Written standby must be within {standby_tolerance_h} h; "
+     "blank standby is added and flagged", ["STANDBY_MISMATCH", "STANDBY_RECOVERED"]),
+    ("confidence", "Read with enough confidence",
+     "Money and identity fields ≥ {min_confidence_critical}; other fields ≥ {min_confidence} unless another record "
+     "confirms the value exactly", ["LOW_CONFIDENCE"]),
+]
+
 RULES_REVISION = "1.1"
 RULE_VERSION = "rules-{}+{}".format(
     RULES_REVISION,
-    hashlib.sha256(json.dumps([CONFIG, REASONS], sort_keys=True).encode()).hexdigest()[:8],
+    hashlib.sha256(json.dumps([CONFIG, REASONS, CHECKS], sort_keys=True).encode()).hexdigest()[:8],
 )
 
 
@@ -302,7 +338,58 @@ def _decide_haul(h: HaulTicket, ref: Reference, scales: dict[str, ScaleTicket], 
         outcome = "exception"
     else:
         outcome = "approve_adjusted" if recovered else "approve"
-    return Decision(h.doc.file, "haul", outcome, tuple(reasons), h.ticket_no, h, s, d, rate, line)
+    checks = _checks(h, s, d, rate, lease, customer, reasons, primary_match, haul_ok, scale_ok)
+    return Decision(h.doc.file, "haul", outcome, tuple(reasons), h.ticket_no, h, s, d, rate, line, checks)
+
+
+def _checks(h: HaulTicket, s: ScaleTicket | None, d: DispatchRecord | None, rate: RateRow | None, lease, customer,
+            reasons: list[Reason], primary_match: bool, haul_ok: set[str], scale_ok: set[str]) -> tuple[Check, ...]:
+    """Every check, passed or not, with the values it compared: the trace shown for each ticket."""
+    by_code: dict[str, list[str]] = {}
+    for r in reasons:
+        by_code.setdefault(r.code, []).append(r.message)
+    passed: dict[str, str | None] = {  # detail when the check ran and passed; None when it couldn't run
+        "read": (f"customer {h.customer_code}, pit {h.pit_code}, lease {h.lease_code} at {h.lsd}"
+                 if h.customer_code and h.pit_code and h.lease_code else None),
+        "duplicate": f"first submission of {h.ticket_no}" if h.ticket_no else None,
+        "scale_found": f"scale ticket {s.scale_ticket_no} ({s.doc.file})" if s else None,
+        "scale_balance": (f"{s.gross_kg:,} − {s.tare_kg:,} = {s.net_kg:,} kg"
+                          if s and None not in (s.gross_kg, s.tare_kg, s.net_kg) else None),
+        "weight": (f"{h.net_t:.2f} t written, {s.net_kg / 1000:.2f} t on the scale; billed at the scale weight"
+                   if s and s.net_kg is not None and h.net_t is not None else None),
+        "scale_match": f"unit {s.unit}, {s.date}, {d.product if d else s.product}" if s else None,
+        "signature": f"signed by {h.receiver_name or 'the receiver'}",
+        "afe": f"{h.afe} is the AFE for {lease.name}" if lease and h.afe else None,
+        "po": f"{h.po} is {customer.name}'s PO" if customer and h.po else None,
+        "dispatch": f"load {d.dispatch_no} found by its load number" if d and primary_match else None,
+        "dispatch_agree": (f"{d.dispatch_no}: date, truck, customer, pit, lease and product agree" if d else None),
+        "rate": (f"${rate.per_tonne:.2f}/t; standby ${rate.standby_per_h:.2f}/h after {rate.free_time_h:g} h free; "
+                 f"in effect from {rate.effective_from}" if rate else None),
+        "standby": None,
+        "confidence": None,
+    }
+    if rate and h.arrive and h.depart:
+        on_site = _hours_on_site(h.arrive, h.depart)
+        earned = billable_standby(h.arrive, h.depart, rate.free_time_h)
+        written = "none" if h.standby_h is None else f"{h.standby_h:g} h"
+        passed["standby"] = f"{on_site:.2f} h on site ({h.arrive:%H:%M}–{h.depart:%H:%M}), {earned:g} h billable, {written} written"
+    fields = len(h.confidence) + (len(s.confidence) if s else 0)
+    confirmed = len(haul_ok & set(h.confidence)) + (len(scale_ok & set(s.confidence)) if s else 0)
+    passed["confidence"] = f"{fields} fields read; {confirmed} confirmed by another record"
+
+    out = []
+    for key_, name, _, codes in CHECKS:
+        hits = [m for c in codes for m in by_code.get(c, [])]
+        blocking = [c for c in codes if c in by_code and c not in ADJUSTMENTS]
+        if blocking:
+            out.append(Check(key_, name, "fail", " | ".join(hits)))
+        elif hits:
+            out.append(Check(key_, name, "adjust", " | ".join(hits)))
+        elif passed[key_] is None:
+            out.append(Check(key_, name, "skip", "not checked: an earlier step failed or a value is missing"))
+        else:
+            out.append(Check(key_, name, "pass", passed[key_]))
+    return tuple(out)
 
 
 def decide(hauls: list[HaulTicket], scales: list[ScaleTicket], unreadable: list[str], ref: Reference,

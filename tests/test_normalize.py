@@ -51,3 +51,11 @@ def test_names_compare_without_case_or_punctuation():
 ])
 def test_billable_standby(arrive, depart, hours):
     assert billable_standby(arrive, depart, free_time_h=1.0) == hours
+
+
+def test_every_ticket_reason_belongs_to_exactly_one_check():
+    from ticket_audit.domain.rules import CHECKS, REASONS
+    batch_level = {"MISSING_TICKET", "ORPHAN_SCALE_TICKET", "UNREADABLE_DOCUMENT", "DUPLICATE_FILE"}
+    owned = [code for *_, codes in CHECKS for code in codes]
+    assert len(owned) == len(set(owned))
+    assert set(owned) == set(REASONS) - batch_level

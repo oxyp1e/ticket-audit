@@ -139,6 +139,15 @@ class Reason:
 
 
 @dataclass(frozen=True)
+class Check:
+    """One check the rules ran on a ticket, with what was compared."""
+    key: str
+    name: str
+    status: str  # "pass" | "fail" | "adjust" | "skip"
+    detail: str
+
+
+@dataclass(frozen=True)
 class InvoiceLine:
     ticket_no: str
     date: date
@@ -169,6 +178,7 @@ class Decision:
     dispatch: DispatchRecord | None = None
     rate: RateRow | None = None
     line: InvoiceLine | None = None  # also set for exceptions when the amount is computable ("at stake")
+    checks: tuple[Check, ...] = ()
 
     @property
     def approved(self) -> bool:

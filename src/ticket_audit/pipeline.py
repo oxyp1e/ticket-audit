@@ -71,6 +71,7 @@ def log_entry(d: Decision, engine: str, model_version: str) -> dict:
                    "dispatch": asdict(d.dispatch) if d.dispatch else None,
                    "rate": asdict(d.rate) if d.rate else None},
         "line": asdict(d.line) if d.line else None,
+        "checks": [asdict(c) for c in d.checks],
     }
 
 

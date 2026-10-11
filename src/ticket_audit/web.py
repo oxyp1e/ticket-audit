@@ -5,6 +5,7 @@ responses shipped with each batch, with a page budget of zero, so this process c
     ACCESS_CODE=... SESSION_SECRET=... uv run uvicorn ticket_audit.web:app
 """
 import hashlib
+import json
 import hmac
 import logging
 import os
@@ -27,24 +28,27 @@ from ticket_audit.evaluate import field_accuracy, outcomes
 from ticket_audit.extract.azure import AzureExtractor
 from ticket_audit.extract.truth import TruthExtractor
 from ticket_audit.pipeline import run_batch
-from ticket_audit.report import render, summarize
+from ticket_audit.report import summarize
+from ticket_audit.site import batch_page, home, trace_page
 
 log = logging.getLogger("ticket_audit.web")
 DATA = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parents[2] / "data" / "generated"))
 COOKIE = "ta_session"
 SESSION_HOURS = 12
 FILE_NAME = re.compile(r"^IMG_\d{4}\.jpg$")
+SUBJECT = re.compile(r"^(IMG_\d{4}\.jpg|D-\d{2}-\d{4})$")
+BUILD_INFO = Path(os.environ.get("BUILD_INFO", Path(__file__).resolve().parents[2] / "build-info.json"))
 BATCH_NAME = re.compile(r"^[a-z0-9-]{1,32}$")
 LOGIN_ATTEMPTS = 5          # per IP per window
 LOGIN_WINDOW_S = 15 * 60
 
-STATE: dict = {"batches": {}, "ready": False, "error": None}
+STATE: dict = {"batches": {}, "ready": False, "error": None, "timings": {}, "build": None}
 _attempts: dict[str, deque] = defaultdict(deque)
 
 
 # ── Startup: audit every preloaded batch ─────────────────────────────────────
 def audit_all() -> None:
-    import json
+
     for batch in sorted(p for p in DATA.iterdir() if (p / "tms.sqlite").exists()):
         raw = batch / "out" / "azure" / "raw"
         if raw.is_dir():
@@ -57,9 +61,12 @@ def audit_all() -> None:
         evaluation = {"fields": field_accuracy(batch, engine), "outcomes": outcomes(batch, engine)}
         (batch / "out" / engine / "evaluation.json").write_text(json.dumps(evaluation, indent=1))
         STATE["batches"][batch.name] = {"engine": engine, "summary": summarize(batch, engine)}
+        STATE["timings"][batch.name] = time.perf_counter() - t0
         log.info("audited %s with %s in %.2fs: %s approved, %s held",
                  batch.name, engine, time.perf_counter() - t0, summary.approved + summary.approved_adjusted,
                  summary.exceptions + summary.missing_tickets)
+    if BUILD_INFO.exists():
+        STATE["build"] = json.loads(BUILD_INFO.read_text())
     STATE["ready"] = True
 
 
@@ -179,18 +186,7 @@ def _not_ready() -> Response:
 async def index(request: Request) -> Response:
     if not STATE["ready"]:
         return _not_ready()
-    cards = ""
-    for name, b in STATE["batches"].items():
-        s = b["summary"]
-        days = s.days[0] if len(s.days) == 1 else f"{s.days[0]} – {s.days[-1]}"
-        cards += f"""<a class="card" href="/b/{escape(name)}/"><b>{escape(name.capitalize())} batch</b>
-<span class="row"><span>{escape(days)}</span><span>{s.tickets} tickets</span><span>touchless {s.touchless:.0%}</span>
-<span>underbilling found ${s.underbilling:,.2f}</span><span>overbilling prevented ${s.overbilling_prevented:,.2f}</span></span></a>"""
-    body = f"""<h1>Ticket Audit</h1><span class="synthetic">Synthetic data only</span>
-<p>Each batch was audited when this server started: photos read by Azure AI Document Intelligence (saved responses),
-matched to dispatch and rates, and decided by the rules.</p>{cards}
-<p style="margin-top:28px"><a href="/logout">Sign out</a></p>"""
-    return HTMLResponse(PAGE.format(body=body))
+    return HTMLResponse(home(STATE["batches"], STATE["build"], STATE["timings"]))
 
 
 def _batch(request: Request):
@@ -206,9 +202,17 @@ async def report(request: Request) -> Response:
     name, b = _batch(request)
     if b is None:
         return PlainTextResponse("Not found", status_code=404)
-    html = render(b["summary"], batch_rel=".")
-    html = html.replace("<main>", '<main><p style="margin:0 0 12px"><a href="/">← All batches</a></p>', 1)
-    return HTMLResponse(html)
+    return HTMLResponse(batch_page(name, b["summary"], list(STATE["batches"])))
+
+
+async def trace(request: Request) -> Response:
+    if not STATE["ready"]:
+        return _not_ready()
+    name, b = _batch(request)
+    subject = request.path_params["subject"]
+    if b is None or not SUBJECT.match(subject) or subject not in b["summary"].entries:
+        return PlainTextResponse("Not found", status_code=404)
+    return HTMLResponse(trace_page(name, b["summary"].entries[subject], list(STATE["batches"])))
 
 
 async def photo(request: Request) -> Response:
@@ -244,7 +248,8 @@ _check_config()
 app = Starlette(
     routes=[
         Route("/", index), Route("/login", login, methods=["GET", "POST"]), Route("/logout", logout),
-        Route("/healthz", healthz), Route("/b/{batch}/", report), Route("/b/{batch}/inbox/{file}", photo),
+        Route("/healthz", healthz), Route("/b/{batch}/", report), Route("/b/{batch}/t/{subject}", trace),
+        Route("/b/{batch}/inbox/{file}", photo),
         Route("/b/{batch}/{file}", download),
     ],
     middleware=[Middleware(Guard)],

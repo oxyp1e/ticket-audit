@@ -1,104 +1,131 @@
 # Ticket Audit
 
-Reads transportation tickets, matches them to dispatch records and customer rates, and produces invoice-ready lines plus an exception queue with plain-language reasons.
+A working system for one problem: transportation tickets arrive by the hundred, and before invoicing someone compares each one against dispatch and the customer's rates. This system reads the haul and scale tickets, does that comparison with explicit rules, bills what is right, and holds everything uncertain for a person with a plain reason and a next step.
 
-**All data in this repository is synthetic.** Every company, person, ticket and rate is invented. The real ticket formats of any carrier are not public; the layouts here are designed from public descriptions of frac-sand hauling in Western Canada.
+**All data here is synthetic.** Every company, person, ticket and rate is invented; the ticket layouts are designed from public descriptions of frac-sand hauling in Western Canada, not from any carrier's real forms.
 
-**Live:** https://ticket-audit.ashydesert-36a868a4.canadacentral.azurecontainerapps.io (access code on request). It audits both synthetic batches when it starts and serves the reports; read-only, no uploads, no OCR key inside (see `docs/adr/0008`).
+**Live:** https://ticket-audit.ashydesert-36a868a4.canadacentral.azurecontainerapps.io (access code on request). The site walks through the same steps as this README, and every ticket in both batches can be opened to see what was read, every check with the values it compared, and the decision.
 
-Design decisions: [`docs/adr/`](docs/adr/) · Operations: [`docs/runbook.md`](docs/runbook.md)
+This README follows the build: problem → process mapping → architecture → development → testing → deployment → improvement.
 
-![Report page for the day batch: underbilling found, overbilling prevented, touchless rate and the exception queue](docs/report.png)
+## 1. Problem
 
-## Run
+> "…receives hundreds of paper/PDF tickets every day and staff manually compare those tickets against dispatch information and customer rates before invoicing…"
+
+The hard part isn't reading a ticket; it's the **three-way comparison**, where errors come from three places:
+
+| Source | What goes wrong |
+|---|---|
+| The ticket | net weight differs from the scale ticket · no receiver signature · no AFE / cost code · standby earned but not written · the same ticket sent twice · an unreadable value |
+| Dispatch | a ticket for a load dispatch never recorded · a dispatched load whose ticket never came back · no load number on the ticket |
+| The rate sheet | no rate for this customer and route · the rate expired before the ticket date |
+
+Each is planted in the synthetic batches (P1–P11 below), so the system is checked against a known answer.
+
+## 2. Process mapping
+
+Today, a person does every check on every ticket. With the system, the same checks run on every ticket the same way, and the person works only the exception queue: in the day batch, 12 items for 100 tickets, each saying what failed and what to do. The individual steps of today's process are an assumption from the posting's wording; mapping the real process with the billing team comes first in production.
+
+## 3. Architecture
+
+```
+Inbox ─▶ Intake ─▶ Read ─▶ Normalize ─▶ Match ─▶ Rate check ─▶ Decide ─┬─▶ approved.csv (invoice-ready lines)
+(folder) SHA-256  [engine]  dates, names,  dispatch  rate sheet   pure    └─▶ exception queue (reasons + next step)
+         dedupe   cached    LSD            [TMS]                  rules    every step ─▶ append-only decision log
+```
+
+**AI reads; rules decide.** Reading a photo is the only probabilistic step and sits behind an engine interface (Azure AI Document Intelligence, a local engine, or generator truth for tests). Decisions are a pure function with no I/O: the same inputs give the same decisions on every run.
+
+| Characteristic | Means here | Fitness function (automated, `tests/test_fitness.py`) |
+|---|---|---|
+| Auditability | every invoice line traceable and replayable | every approved line's photo hashes, dispatch, rate and decision-log entry verify |
+| Data integrity | nothing wrong reaches an invoice; anything uncertain is held | every load gets exactly its required outcome; nothing planted is approved; nothing clean is flagged |
+| Reliability | no ticket lost or processed twice, even through a crash | a run killed halfway, re-run, gives byte-identical output; nothing read twice |
+
+Deliberately not optimized: throughput (hundreds a day is one every few minutes) and availability (a batch that is down an hour delays tickets, loses none).
+
+Decisions, each with its reasoning and evidence:
+
+1. [The OCR engine sits behind an interface](docs/adr/0001-extraction-behind-an-interface.md)
+2. [AI never makes the approve decision](docs/adr/0002-ai-never-approves.md)
+3. [When in doubt, it's an exception](docs/adr/0003-when-in-doubt-exception.md)
+4. [An append-only decision log with provenance](docs/adr/0004-append-only-decision-log.md)
+5. [One process, SQLite, run as a batch](docs/adr/0005-one-process-sqlite-batch.md)
+6. [Read fields by position; Azure's key-value pairing is a second opinion](docs/adr/0006-position-based-field-pairing.md)
+7. [Bill tonnes from the scale ticket](docs/adr/0007-bill-from-the-scale-ticket.md)
+8. [The deployed system is read-only and holds no OCR key](docs/adr/0008-deployment-read-only.md)
+
+## 4. Development: the rules
+
+A load is approved only when all 14 checks pass (`CHECKS` in [`domain/rules.py`](src/ticket_audit/domain/rules.py); the site's rule table is generated from it):
+
+ticket read completely and resolved against master data · not already submitted · scale ticket found · scale ticket adds up (gross − tare = net) · driver's weight within 0.05 t of the scale · scale ticket is this load · signed by the receiver · AFE matches the lease · PO matches the customer · matched to dispatch by load number · agrees with dispatch · exactly one rate in effect · standby consistent with time on site · read with enough confidence (0.90 for money and identity fields; 0.80 for others unless another record confirms the value exactly).
+
+- Tonnes are billed from the scale ticket; the handwritten weight is a cross-check.
+- The one automatic change: standby earned on site but left blank is added and flagged as recovered.
+- A match to dispatch without a load number is never auto-approved.
+- Every decision records every check, passed or failed, with the values it compared, plus the SHA-256 of its photos, the rule version (a hash of the rule table) and the OCR model. The decision log can't be edited or deleted.
+
+## 5. Testing
+
+- **Fitness functions** for the three characteristics, on both batches.
+- **Deliberate breaks:** the build applies five known bugs one at a time (signature check removed, weight tolerance widened, fallback match auto-approved, a photo hash dropped, the cache bypassed) and fails if the tests don't catch each one ([`scripts/build_info.py`](scripts/build_info.py)). The results are shown on the live site for the exact build it runs.
+- **Real OCR** on every synthetic photo, compared with the generator's answer key (which only the evaluation reads, never the rules):
+
+| Batch | Photos | Fields read right | Wrong *and* confident | Planted problems held | Loads that should pass, approved |
+|---|---|---|---|---|---|
+| audit (30 loads, a week) | 59 | 655 / 658 | 1 | 9 / 9 | 20 / 22 |
+| day (100 loads, one day) | 199 | 2,203 / 2,204 | 0 | 12 / 12 | 89 / 89 |
+
+The confident misread is a smudged weight (40.48 t for 40.49) that is billed correctly from the scale ticket. The two held loads in the audit batch are one real PO misread (a handwritten 1 read as 7), held correctly. Synthetic tickets prove the engineering, not accuracy on real tickets; that needs a pilot (section 8).
+
+## 6. Deployment
+
+Azure Container Apps (consumption, scale to zero), free tiers only, $1 budget alert. At startup the container audits both batches from the saved Azure responses with a page budget of zero: it holds no OCR key and can't call Azure. Read-only, access code, rate-limited sign-in, strict content security policy. [Runbook](docs/runbook.md) for OCR, network, budget, storage and deployment failures; all fail closed.
+
+## 7. Improvement
+
+What broke while building it, what changed, and the measured effect, all on this system's own runs ([`improvements.py`](src/ticket_audit/improvements.py), shown on the site). For example:
+
+- Azure's key-value pairing glued a ticket number to the date and shifted a row of boxes: fields are now read by position, with Azure's pairing as a second opinion (audit batch 12 → 17 approved, every planted problem still held).
+- A first fix for day-batch parsing gaps made things worse (81 → 41 of 89 approved); a structural rule replaced it (→ 89 of 89).
+- The network dropped after 117 of 199 photos: the re-run reused every saved response and read only the rest.
+
+## 8. Limits and next step
+
+- Assumed, not sourced: B-train weights (gross ≤ 63,500 kg, net 38–42 t), one hour of free time, the rates, the error shares. Sourced: land descriptions follow the Alberta DLS format and every one is validated.
+- Stand-ins: a folder for the inbox, SQLite for the TMS, CSV for accounting. Not built: owner-operator settlements, multi-user review, accounting integration.
+- **Next step: a shadow-mode pilot.** Real tickets and the rate sheet's structure; fit the field reader to the real forms; run alongside billing for two weeks without invoicing anything, comparing decisions with the team's daily; go live only on agreed numbers.
+
+## Run it
 
 ```bash
 uv sync
-uv run python -m ticket_audit.synth          # generate both batches into data/generated/
-uv run python -m ticket_audit data/generated/audit   # audit a batch -> out/<engine>/approved.csv, exceptions.csv, report.html
-uv run python -m ticket_audit data/generated/audit --engine azure   # same, reading the photos with Azure (needs .env)
-uv run pytest                                # fitness functions, rules, generator realism checks
-deploy/deploy.sh                             # build, push, deploy to Azure Container Apps (see the runbook)
+uv run python -m ticket_audit.synth                         # generate both batches into data/generated/
+uv run python -m ticket_audit data/generated/day            # audit with generator truth (no OCR, no cost)
+uv run python -m ticket_audit data/generated/day --engine azure --max-pages 200   # read the photos with Azure (.env)
+uv run python -m ticket_audit.evaluate data/generated/day --engine azure          # compare with the answer key
+uv run pytest                                               # 76 tests, including the fitness functions
+uv run uvicorn ticket_audit.web:app                         # the site (needs ACCESS_CODE, SESSION_SECRET)
+deploy/deploy.sh                                            # build (tests run in the build), push, deploy
 ```
 
-## How it decides
+### Synthetic batches and planted problems
 
-```
-Inbox ─▶ Intake ─▶ Extract ─▶ Normalize ─▶ Match ─▶ Rate check ─▶ Decide ─┬─▶ approved.csv (invoice-ready lines)
-(folder) SHA-256   [engine]   dates, units, dispatch  rate sheet   rules   └─▶ exceptions.csv (plain reasons)
-         dedupe    cached     names, LSD    [TMS]                      every decision ─▶ append-only decision log
-```
+Each load produces two phone photos: the driver's haul ticket (pre-printed form, filled in by hand, signed by the receiver) and the pit's scale ticket (thermal printout, kg). Photo names are phone-style (`IMG_4821.jpg`), so only the content links a photo to a load.
 
-- **Rules decide, AI only reads.** The decision engine (`domain/rules.py`) is a pure function: no I/O, same inputs give the same decisions every run. Thresholds and reason texts are data; their hash is the rule version stamped on every decision.
-- **When in doubt, it's an exception.** A load is approved only when every check passes: haul ticket ↔ scale ticket (weight, truck, date, product), ticket ↔ dispatch (load number, then fields), rate on file and in effect, signature, AFE and PO, and every value that no other record confirms read with enough confidence (0.90 for money and identity fields, 0.80 otherwise). A match made without a load number is never auto-approved.
-- **Tonnes are billed from the scale ticket** (printed, and checked by gross − tare = net). The driver's handwritten weight is a cross-check: if it agrees within 0.05 t its OCR confidence doesn't matter; if it disagrees, the ticket is held. On real OCR, a smudged weight was read 0.01 t off at 0.91 confidence. Billing from the scale ticket keeps the amount right anyway.
-- **The one automatic adjustment:** standby earned (time on site beyond the rate's free time) but left blank on the ticket is added to the line, and flagged as recovered.
-- **Provenance on every line.** Each approved line carries the SHA-256 of both source photos, the dispatch number, the rate row, the rule version, the extraction engine and model, and the hash of its decision-log entry. The log can't be edited or deleted (database triggers).
-- **Safe to re-run.** Every extraction is cached by photo fingerprint and committed as it's made. A run killed halfway resumes from the cache, and re-running a batch rewrites byte-identical outputs.
-
-### Fitness functions (`tests/test_fitness.py`)
-
-| Characteristic | Test |
-|---|---|
-| Auditability | Every approved line's provenance is complete and verifies: photo hashes match the files, dispatch and rate exist, log entry hash matches |
-| Data integrity | Every load gets exactly its required outcome and reasons; nothing planted is approved; nothing clean is flagged |
-| Reliability | Kill a run halfway, re-run: byte-identical outputs, no document read twice, no ticket billed twice |
-
-Each test was checked by deliberately breaking the engine (removing the signature check, widening the weight tolerance, dropping a hash, bypassing the cache, auto-approving fallback matches); all five breaks were caught.
-
-## Results on real OCR (Azure AI Document Intelligence, free tier)
-
-Every photo in both batches was read once by Azure; raw responses are cached, so re-running costs nothing.
-
-| Batch | Photos | Decision fields read right | Wrong *and* confident | Planted problems held | Loads that should pass, approved |
-|---|---|---|---|---|---|
-| audit (30 loads) | 59 | 655 / 658 (99.5%) | 1 | 9 / 9 | 20 / 22 |
-| day (100 loads) | 199 | 2,203 / 2,204 (99.95%) | 0 | 12 / 12 | 89 / 89 |
-
-- The one confident misread: a smudged, written-over weight read as 40.48 t (true 40.49) at 0.91 confidence. Billing uses the scale ticket, so the amount is still right.
-- The two held loads in the audit batch are both a real misread of one customer's PO (`75186` read as `75786`: a handwritten 1 vs 7). The system holds the ticket instead of guessing.
-- Run `uv run python -m ticket_audit.evaluate data/generated/<batch> --engine azure` to reproduce (it compares with the generator's answer key, which the rules never see).
-
-What it took: Azure's own label-value pairing was the weak spot on these forms (it glued a ticket number to the date, missed a signature box, and shifted a whole row by one). Fields are now paired with labels by position on the page; Azure's pairing is a second opinion, and when the two disagree the field goes to a human. Each case is a regression test built from a saved response (`tests/fixtures/azure/`).
-
-## Synthetic data
-
-Each load produces two phone photos: the driver's **haul ticket** (pre-printed form, filled in by hand, signed by the receiver at the well site) and the pit's **scale ticket** (thermal printout with gross/tare/net in kg). Dispatch, rates and master data sit in `tms.sqlite`, the stand-in for a TMS.
-
-| Batch | Loads | Problems | Read with |
+| Code | Source | Planted problem | Required outcome |
 |---|---|---|---|
-| `audit` | 30 | every planted problem at least once, ~19 clean | Azure AI Document Intelligence |
-| `day` | 100 loads in one day (~200 ticket photos) | a realistic share, ~15% of loads | Azure AI Document Intelligence, once; results cached by photo fingerprint |
+| P1 | Ticket | Net weight differs from the scale ticket | Held |
+| P2 | Ticket | No receiver signature | Held |
+| P3 | Ticket | Missing AFE / cost code | Held |
+| P4 | Ticket | Same ticket submitted twice | Second copy held |
+| P5 | Ticket | Long time on site, standby left blank | Standby added |
+| P6 | Ticket | Written-over, smudged net weight | Billed from the scale ticket |
+| P7 | Dispatch | Ticket with no dispatch record | Held |
+| P8 | Dispatch | Dispatched load with no ticket | Flagged as missing |
+| P9 | Dispatch | No load number; date, truck and customer match | Held for confirmation |
+| P10 | Rates | No rate for the customer and route | Held |
+| P11 | Rates | Ticket dated after the rate expired | Held |
 
-Both batches together come to about 260 OCR pages, inside the free tier's 500 a month. Development and tests run on generator truth and use no pages.
-
-Planted problems cover all three sources the comparison uses:
-
-| Code | Source | Problem | Required outcome |
-|---|---|---|---|
-| P1 | Ticket | Net tonnes on the haul ticket differ from the scale ticket | Exception |
-| P2 | Ticket | No receiver signature | Exception |
-| P3 | Ticket | Missing AFE / cost code | Exception |
-| P4 | Ticket | Same ticket submitted twice | Second copy is an exception |
-| P5 | Ticket | Long time on site, standby left blank | Standby added, if a rate is on file |
-| P6 | Ticket | Written-over, smudged net weight | Billed from the scale ticket, since the two agree |
-| P7 | Dispatch | Ticket with no dispatch record | Exception |
-| P8 | Dispatch | Dispatched load with no ticket | Flagged as a missing ticket |
-| P9 | Dispatch | Load number missing; date + unit + customer match | Matched, never auto-approved |
-| P10 | Rates | No rate for the customer and route | Exception |
-| P11 | Rates | Ticket dated after the rate expired | Exception |
-
-The generator keeps the answers apart from the inputs: `truth/expected.json` is read only by tests, never by the rules. Photo file names are phone-style (`IMG_4821.jpg`), so only the content links a photo to a load.
-
-### Assumptions (no public source)
-
-- **[ASSUMPTION]** B-train frac-sand loads: gross weight up to 63,500 kg, tare 20.5–23.5 t, net 38–42 t.
-- **[ASSUMPTION]** One hour of free time on site before standby is billable; standby written to the quarter hour.
-- **[ASSUMPTION]** Per-tonne rates and standby rates are invented figures.
-- **[ASSUMPTION]** Error shares in the day batch (about 8% load-level problems plus whole-job rate problems) are chosen, not measured.
-
-Sourced: legal land descriptions follow the Alberta DLS format (AER UWI description) and every generated LSD is validated.
-
-## Fonts
-
-Caveat, Courier Prime and Roboto Condensed, under the SIL Open Font License (`assets/fonts/`).
+Fonts: Caveat, Courier Prime and Roboto Condensed, SIL Open Font License (`assets/fonts/`).
