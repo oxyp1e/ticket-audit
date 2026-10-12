@@ -51,7 +51,7 @@ def test_right_code_opens_the_reports_and_photos(client):
     r = c.post("/login", data={"code": "right-code-123"}, follow_redirects=False)
     assert r.status_code == 303 and "httponly" in r.headers["set-cookie"].lower()
     page = c.get("/b/audit/")
-    assert page.status_code == 200 and "Synthetic batch" in page.text
+    assert page.status_code == 200 and "Synthetic data" in page.text
     assert page.headers["cache-control"] == "private, no-store"
     photo = sorted((data / "audit" / "inbox").iterdir())[0].name
     assert c.get(f"/b/audit/inbox/{photo}").status_code == 200
@@ -72,3 +72,26 @@ def test_sign_in_attempts_are_limited(client):
     codes = [c.post("/login", data={"code": "wrong"}, headers={"x-forwarded-for": "203.0.113.9"}).status_code
              for _ in range(6)]
     assert codes[-1] == 429 and codes[0] == 200
+
+
+def test_work_screens(client):
+    c, _ = client
+    c.post("/login", data={"code": "right-code-123"})
+    queue = c.get("/b/audit/queue")
+    assert queue.status_code == 200 and "Exception queue" in queue.text
+    filtered = c.get("/b/audit/queue?reason=NO_SIGNATURE")
+    assert filtered.text.count('class="btn" href="/b/audit/t/') == 1  # exactly the one unsigned ticket
+    assert "No items match" in c.get("/b/audit/queue?q=NOPE-000").text
+    assert c.get("/b/audit/lines").status_code == 200
+    assert "Thresholds" in c.get("/rules").text
+    first = queue.text.split('class="btn" href="')[1].split('"')[0]
+    detail = c.get(first)
+    assert detail.status_code == 200 and "Next →" in detail.text and "checks passed" in detail.text
+
+
+def test_static_files_are_public_and_limited(client):
+    c, _ = client
+    c.cookies.clear()
+    assert c.get("/static/Inter.woff2").status_code == 200
+    assert c.get("/static/favicon.svg").status_code == 200
+    assert c.get("/static/..%2F..%2Fpyproject.toml").status_code == 404

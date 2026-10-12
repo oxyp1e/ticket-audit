@@ -29,7 +29,7 @@ from ticket_audit.extract.azure import AzureExtractor
 from ticket_audit.extract.truth import TruthExtractor
 from ticket_audit.pipeline import run_batch
 from ticket_audit.report import summarize
-from ticket_audit.site import batch_page, home, trace_page
+from ticket_audit.site import dashboard_page, home, lines_page, queue_page, rules_page, trace_page
 
 log = logging.getLogger("ticket_audit.web")
 DATA = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parents[2] / "data" / "generated"))
@@ -37,6 +37,8 @@ COOKIE = "ta_session"
 SESSION_HOURS = 12
 FILE_NAME = re.compile(r"^IMG_\d{4}\.jpg$")
 SUBJECT = re.compile(r"^(IMG_\d{4}\.jpg|D-\d{2}-\d{4})$")
+STATIC = Path(__file__).resolve().parents[2] / "assets" / "web"
+STATIC_FILES = {"Inter.woff2": "font/woff2", "favicon.svg": "image/svg+xml"}
 BUILD_INFO = Path(os.environ.get("BUILD_INFO", Path(__file__).resolve().parents[2] / "build-info.json"))
 BATCH_NAME = re.compile(r"^[a-z0-9-]{1,32}$")
 LOGIN_ATTEMPTS = 5          # per IP per window
@@ -104,11 +106,12 @@ def _client(request: Request) -> str:
 
 class Guard(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path not in ("/login", "/healthz") and not _valid(request.cookies.get(COOKIE)):
+        public = request.url.path in ("/login", "/healthz") or request.url.path.startswith("/static/")
+        if not public and not _valid(request.cookies.get(COOKIE)):
             return RedirectResponse("/login", status_code=303)
         response = await call_next(request)
         response.headers.update({
-            "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+            "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; font-src 'self'; "
                                        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer",
@@ -121,22 +124,28 @@ class Guard(BaseHTTPMiddleware):
 
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Ticket Audit</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <style>
-:root {{ --bg:#f6f5f1; --panel:#fff; --ink:#1d1d1f; --muted:#6b6b70; --line:#e4e2dc; --accent:#1f5f8b; --warn:#a15c00; --on-warn:#fff; --bad:#b3261e; }}
-@media (prefers-color-scheme: dark) {{ :root:not([data-theme="light"]) {{ --bg:#141416; --panel:#1d1d20; --ink:#ececee; --muted:#9a9aa1; --line:#2e2e33; --accent:#78b3dc; --warn:#e5a44a; --on-warn:#1d1d1f; --bad:#f28b82; }} }}
-:root[data-theme="dark"] {{ --bg:#141416; --panel:#1d1d20; --ink:#ececee; --muted:#9a9aa1; --line:#2e2e33; --accent:#78b3dc; --warn:#e5a44a; --on-warn:#1d1d1f; --bad:#f28b82; }}
+@font-face {{ font-family:"Inter"; src:url("/static/Inter.woff2") format("woff2"); font-weight:100 900; font-display:swap; }}
+:root {{ --bg:#0f1b2a; --panel:#fff; --ink:#18202b; --muted:#5f6b7a; --line:#e3e6ea; --accent:#1d5f8f; --warn:#965a00; --bad:#b42318; }}
+@media (prefers-color-scheme: dark) {{ :root:not([data-theme="light"]) {{ --bg:#0a0d12; --panel:#171a20; --ink:#e8ebef; --muted:#99a3af; --line:#2a2f37; --accent:#7cb4df; --warn:#e5a44a; --bad:#f28b82; }} }}
+:root[data-theme="dark"] {{ --bg:#0a0d12; --panel:#171a20; --ink:#e8ebef; --muted:#99a3af; --line:#2a2f37; --accent:#7cb4df; --warn:#e5a44a; --bad:#f28b82; }}
 * {{ box-sizing:border-box; }}
-body {{ margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }}
-main {{ max-width:720px; margin:0 auto; padding:48px 16px; }}
-h1 {{ font-size:24px; margin:0 0 4px; }} p {{ color:var(--muted); }}
-.synthetic {{ display:inline-block; background:var(--warn); color:var(--on-warn); font-size:12px; font-weight:600; padding:2px 8px; border-radius:99px; }}
-.card {{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-top:16px; display:block; color:inherit; text-decoration:none; }}
-a.card:hover {{ border-color:var(--accent); }}
-.card b {{ font-size:17px; }} .row {{ display:flex; gap:20px; flex-wrap:wrap; margin-top:6px; font-size:14px; color:var(--muted); }}
-form {{ display:flex; gap:8px; margin-top:20px; flex-wrap:wrap; }}
-input {{ flex:1; min-width:200px; font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--ink); }}
-button {{ font:inherit; font-weight:600; padding:10px 18px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }}
-.err {{ color:var(--bad); }} a {{ color:var(--accent); }}
+body {{ margin:0; min-height:100vh; display:grid; place-items:center; padding:24px 16px; background:var(--bg);
+  background-image:radial-gradient(1200px 500px at 20% -10%, rgba(43,123,185,.35), transparent 60%);
+  color:var(--ink); font:15px/1.55 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }}
+main {{ width:100%; max-width:440px; background:var(--panel); border-radius:16px; padding:30px 28px; box-shadow:0 20px 60px rgba(0,0,0,.35); }}
+.brand {{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:17px; margin-bottom:18px; }}
+h1 {{ font-size:22px; line-height:1.25; margin:0 0 8px; letter-spacing:-.01em; }} p {{ color:var(--muted); margin:0 0 12px; }}
+.synthetic {{ display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--warn); }}
+.synthetic::before {{ content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }}
+form {{ display:flex; flex-direction:column; gap:10px; margin-top:18px; }}
+label {{ font-size:13px; font-weight:600; }}
+input {{ font:inherit; padding:11px 12px; border:1px solid var(--line); border-radius:9px; background:transparent; color:var(--ink); }}
+input:focus {{ outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }}
+button {{ font:inherit; font-weight:600; padding:11px 18px; border:0; border-radius:9px; background:var(--accent); color:#fff; cursor:pointer; }}
+.err {{ color:var(--bad); margin-top:10px; }} a {{ color:var(--accent); }}
+.foot {{ margin-top:18px; padding-top:14px; border-top:1px solid var(--line); font-size:12.5px; color:var(--muted); }}
 </style></head><body><main>{body}</main></body></html>"""
 
 
@@ -161,11 +170,13 @@ async def login(request: Request) -> Response:
             return response
         window.append(now)
         error = "<p class='err'>That code didn't work.</p>"
-    body = f"""<h1>Ticket Audit</h1><span class="synthetic">Synthetic data only</span>
-<p>Reads haul and scale tickets, matches them to dispatch and rates, and holds anything uncertain for a person.
-Every company, ticket and rate here is invented.</p>
-<form method="post"><input name="code" type="password" placeholder="Access code" autocomplete="current-password"
-autofocus required><button type="submit">Open</button></form>{error}"""
+    body = f"""<div class="brand"><svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><rect width="26" height="26" rx="7" fill="#2b7bb9"/><path d="M7 7h12v12H7z" fill="none" stroke="#fff" stroke-width="1.6" stroke-dasharray="2.2 1.6"/><path d="M9.5 13.2l2.3 2.3 4.7-5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Ticket Audit</div>
+<h1>Automated ticket audit before invoicing</h1>
+<p>Reads haul and scale tickets, compares them with dispatch and the rate sheet, and holds anything uncertain for a
+person with a plain reason.</p><span class="synthetic">Synthetic data only: every company, ticket and rate is invented</span>
+<form method="post"><label for="code">Access code</label><input id="code" name="code" type="password"
+autocomplete="current-password" autofocus required><button type="submit">Sign in</button></form>{error}
+<div class="foot">Read-only. Built and deployed by Vitalii Apostolyuk.</div>"""
     return HTMLResponse(PAGE.format(body=body))
 
 
@@ -186,7 +197,7 @@ def _not_ready() -> Response:
 async def index(request: Request) -> Response:
     if not STATE["ready"]:
         return _not_ready()
-    return HTMLResponse(home(STATE["batches"], STATE["build"], STATE["timings"]))
+    return HTMLResponse(home(STATE))
 
 
 def _batch(request: Request):
@@ -202,7 +213,40 @@ async def report(request: Request) -> Response:
     name, b = _batch(request)
     if b is None:
         return PlainTextResponse("Not found", status_code=404)
-    return HTMLResponse(batch_page(name, b["summary"], list(STATE["batches"])))
+    return HTMLResponse(dashboard_page(name, STATE))
+
+
+async def queue(request: Request) -> Response:
+    if not STATE["ready"]:
+        return _not_ready()
+    name, b = _batch(request)
+    if b is None:
+        return PlainTextResponse("Not found", status_code=404)
+    p = request.query_params
+    return HTMLResponse(queue_page(name, STATE, reason=p.get("reason", "")[:40], source=p.get("source", "")[:10],
+                                   q=p.get("q", "")[:40]))
+
+
+async def lines(request: Request) -> Response:
+    if not STATE["ready"]:
+        return _not_ready()
+    name, b = _batch(request)
+    if b is None:
+        return PlainTextResponse("Not found", status_code=404)
+    return HTMLResponse(lines_page(name, STATE))
+
+
+async def rules(request: Request) -> Response:
+    if not STATE["ready"]:
+        return _not_ready()
+    return HTMLResponse(rules_page(STATE))
+
+
+async def static(request: Request) -> Response:
+    file = request.path_params["file"]
+    if file not in STATIC_FILES:
+        return PlainTextResponse("Not found", status_code=404)
+    return FileResponse(STATIC / file, media_type=STATIC_FILES[file], headers={"Cache-Control": "public, max-age=86400"})
 
 
 async def trace(request: Request) -> Response:
@@ -212,7 +256,7 @@ async def trace(request: Request) -> Response:
     subject = request.path_params["subject"]
     if b is None or not SUBJECT.match(subject) or subject not in b["summary"].entries:
         return PlainTextResponse("Not found", status_code=404)
-    return HTMLResponse(trace_page(name, b["summary"].entries[subject], list(STATE["batches"])))
+    return HTMLResponse(trace_page(name, b["summary"].entries[subject], STATE))
 
 
 async def photo(request: Request) -> Response:
@@ -248,7 +292,9 @@ _check_config()
 app = Starlette(
     routes=[
         Route("/", index), Route("/login", login, methods=["GET", "POST"]), Route("/logout", logout),
-        Route("/healthz", healthz), Route("/b/{batch}/", report), Route("/b/{batch}/t/{subject}", trace),
+        Route("/healthz", healthz), Route("/rules", rules), Route("/static/{file}", static),
+        Route("/b/{batch}/", report), Route("/b/{batch}/queue", queue), Route("/b/{batch}/lines", lines),
+        Route("/b/{batch}/t/{subject}", trace),
         Route("/b/{batch}/inbox/{file}", photo),
         Route("/b/{batch}/{file}", download),
     ],
