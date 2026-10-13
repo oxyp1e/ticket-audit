@@ -54,6 +54,8 @@ az containerapp logs show -n ticket-audit -g rg-ticket-audit --subscription "$AZ
 ```
 A healthy start logs one line per batch: `audited day with azure in 1.0s: 89 approved, 12 held`.
 
+**Keeping it warm for a review window:** the app normally scales to zero, so the first visit after a quiet spell takes about 30 s (the container starts and re-audits both batches). For a review window, keep one replica: `az containerapp update -n ticket-audit -g rg-ticket-audit --subscription "$AZURE_SUBSCRIPTION" --min-replicas 1`. The scheduled job `job-scale-to-zero` (Azure CLI image, its own managed identity with Contributor on this app only) sets it back to zero at its cron time; run it early with `az containerapp job start -n job-scale-to-zero -g rg-ticket-audit --subscription "$AZURE_SUBSCRIPTION"`. Its cron fires yearly, so delete the job once it has done its work.
+
 **Kill switch:**
 ```bash
 # Take it offline (keeps everything for later)
